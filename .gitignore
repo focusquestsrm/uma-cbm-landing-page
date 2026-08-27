@@ -1,0 +1,27 @@
+# Project notes
+.env
+.env.*
+!.env.example
+
+# Keep the original Fallon package and extracted source private.
+source-original/
+source-original/**
+
+# macOS metadata and local temp files
+**/.DS_Store
+**/__MACOSX/
+**/*.tmp
+**/*.swp
+**/*.bak
+**/~$
+
+# Miscellaneous local output
+.DS_Store
+Thumbs.db
+
+# Local preview artifacts if created later
+coverage/
+node_modules/
+*.log
+.netlify/
+.artifacts/

@@ -1,0 +1,15 @@
+{
+  "name": "uma-college-matcher",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "node scripts/build-programs.js && node scripts/build-runtime-config.js",
+    "check": "node scripts/build-programs.js && node scripts/build-runtime-config.js && node checks/program-config.js && node checks/production-guard.js && node checks/function-contract.js && node checks/feature-contract.js",
+    "check:interactions": "node checks/interaction-qa.js",
+    "check:limited-navigation": "node checks/limited-navigation-qa.js",
+    "check:secrets": "node checks/secret-scan.js"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^11.0.1"
+  }
+}
