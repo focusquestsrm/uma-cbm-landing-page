@@ -93,7 +93,7 @@ LeadHoop values:
 
 ## TCPA disclosure
 
-"By clicking the Request Info button below, I am providing my eSIGN signature and express written consent for Ultimate Medical Academy (UMA), Back2Learn, and parties calling on its behalf, to call or text me at the number provided above for purposes relating to educational opportunities with UMA, including through the use of automatic telephone dialing technology. I am authorized to consent to receive these communications at the phone number provided. I understand that I am consenting to receive calls and text messages regardless of whether the number provided is on any do not call list, either now or in the future. I acknowledge that my consent is not required to enroll, and I may revoke my consent at any time. I acknowledge that all calls may be recorded."
+"By clicking the Request Info button below, I am providing my eSIGN signature and express written consent for Ultimate Medical Academy (UMA), Back2Learn, and parties calling on its behalf, to call or text me at the number provided above for purposes relating to educational opportunities with UMA, including through the use of automatic telephone dialing technology and pre-recorded messages. I am authorized to consent to receive these communications at the phone number provided. I understand that I am consenting to receive calls and text messages regardless of whether the number provided is on any do not call list, either now or in the future. I acknowledge that my consent is not required to enroll, and I may revoke my consent at any time. I acknowledge that all calls may be recorded."
 
 - Checkbox ID: leadid_tcpa_disclosure
 - Submitted value: Y only when checked
