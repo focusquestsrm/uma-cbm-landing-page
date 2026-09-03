@@ -1,7 +1,9 @@
 import { getStore } from '@netlify/blobs';
 import availabilityModule from './program-availability.js';
+import submissionIdempotencyModule from './submission-idempotency.js';
 
 availabilityModule.configureNetlifyStore(getStore);
+submissionIdempotencyModule.configureNetlifyStore(getStore);
 
 export function toEvent(request, body) {
   const url = new URL(request.url);

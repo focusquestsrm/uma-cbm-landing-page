@@ -2,6 +2,7 @@
 
 const assert = require('assert');
 const availability = require('../netlify/functions/_shared/program-availability');
+const submissionIdempotency = require('../netlify/functions/_shared/submission-idempotency');
 const { classifyLeadHoopResponse } = require('../netlify/functions/_shared/leadhoop-response');
 const graduationYears = require('../src/js/graduation-years');
 const routineLogs = [];
@@ -48,6 +49,7 @@ env(['PROGRAM', 'AVAILABILITY', 'ADMIN', 'SECRET'], 'unit-test-admin-secret');
 
 const store = new MemoryStore();
 availability.setStoreFactoryForTests(function () { return store; });
+submissionIdempotency.setStoreFactoryForTests(function () { return store; });
 const submit = require('../netlify/functions/_shared/submit-lead-handler').handler;
 const getPrograms = require('../netlify/functions/_shared/get-program-availability-handler').handler;
 const managePrograms = require('../netlify/functions/_shared/manage-program-availability-handler').handler;
@@ -55,6 +57,7 @@ const managePrograms = require('../netlify/functions/_shared/manage-program-avai
 let eventSequence = 0;
 function leadEvent(programId, overrides) {
   eventSequence += 1;
+  const submissionId = 'submission-' + String(eventSequence).padStart(6, '0') + '-' + Math.random().toString(36).slice(2, 12);
   const fields = Object.assign({
     'lead[firstname]': 'Unit', 'lead[lastname]': 'Review',
     'lead[email]': `unit-${eventSequence}@example.invalid`,
@@ -62,6 +65,7 @@ function leadEvent(programId, overrides) {
     'lead[test]': 'true', 'lead[service_trusted_form]': 'certificate-value',
     'lead[service_leadid]': 'leadid-value', 'lead_education[program_id]': programId,
     'lead_education[grad_year]': '2023',
+    submission_id: submissionId,
     subid2: 'fb.1.1111111111.TESTFBC', subid3: 'fb.1.2222222222.TESTFBP', subid4: 'TEST-FBCLID-3333',
     unexpected: 'must-not-pass'
   }, overrides || {});

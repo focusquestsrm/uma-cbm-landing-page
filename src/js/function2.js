@@ -7,7 +7,61 @@
   const endpoint = '/.netlify/functions/submit-lead';
   let submissionInProgress = false;
   let submissionHandled = false;
+  let submissionId = '';
+  const pendingStorageKey = 'umaLeadSubmissionState';
+  const pendingRetentionMs = 24 * 60 * 60 * 1000;
   const genericError = 'We’re unable to process your request at this time. Please try again shortly.';
+  const ambiguousError = 'Your request is being processed. Please do not submit it again.';
+
+  if (!form.dataset) form.dataset = {};
+  if (form.dataset.submissionHandlerBound === 'true') return;
+  form.dataset.submissionHandlerBound = 'true';
+
+  function createSubmissionId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+    if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+      const values = new Uint32Array(4);
+      window.crypto.getRandomValues(values);
+      return 'uma-' + Array.from(values, function (value) { return value.toString(16).padStart(8, '0'); }).join('');
+    }
+    return 'uma-' + Date.now() + '-' + Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
+  }
+
+  function persistSubmissionState(state) {
+    try {
+      sessionStorage.setItem(pendingStorageKey, JSON.stringify({
+        submissionId,
+        state,
+        expiresAt: Date.now() + pendingRetentionMs
+      }));
+    } catch (error) {}
+  }
+
+  function clearSubmissionState() {
+    try { sessionStorage.removeItem(pendingStorageKey); } catch (error) {}
+  }
+
+  function restoreSubmissionState() {
+    let stored;
+    try { stored = JSON.parse(sessionStorage.getItem(pendingStorageKey) || 'null'); } catch (error) { stored = null; }
+    if (!stored || !/^[A-Za-z0-9][A-Za-z0-9_-]{15,127}$/.test(String(stored.submissionId || '')) ||
+        !Number.isFinite(stored.expiresAt) || stored.expiresAt <= Date.now()) {
+      clearSubmissionState();
+      return;
+    }
+    submissionId = stored.submissionId;
+    const submissionField = document.getElementById('submission_id');
+    if (submissionField) submissionField.value = submissionId;
+    if (stored.state !== 'pending') return;
+    submissionInProgress = true;
+    submissionHandled = true;
+    const button = document.getElementById('submitButton');
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Processing...';
+    }
+    displayStatus(ambiguousError, 'error');
+  }
 
   function setError(elementId, message) {
     const target = document.getElementById(elementId);
@@ -202,6 +256,9 @@
 
   form.addEventListener('submit', async function (event) {
     event.preventDefault();
+    const visibleStep = form.querySelector('.form-step.is-visible');
+    const addressInput = document.getElementById('lead_address_address_visible');
+    if (visibleStep && visibleStep.dataset.step === '2' && document.activeElement === addressInput) return;
     if (submissionInProgress || submissionHandled) return;
     if (!validateStepTwo()) {
       updateStep(2);
@@ -210,6 +267,10 @@
     if (!validateStepThree()) return;
     submissionInProgress = true;
     const button = document.getElementById('submitButton');
+    const submissionField = document.getElementById('submission_id');
+    if (!submissionId) submissionId = createSubmissionId();
+    if (submissionField) submissionField.value = submissionId;
+    persistSubmissionState('pending');
     button.disabled = true;
     button.textContent = 'Submitting...';
     displayStatus('', '');
@@ -224,6 +285,7 @@
       const result = await response.json();
       if (response.ok && (result.outcome === 'accepted' || result.outcome === 'failed') && result.location) {
         submissionHandled = true;
+        clearSubmissionState();
         const eventId = String(document.getElementById('meta_event_id').value || '');
         form.reset();
         sessionStorage.removeItem('umaProgramId');
@@ -235,12 +297,25 @@
         window.setTimeout(function () { window.location.assign(result.location); }, 3000);
         return;
       }
-      throw new Error('Unable to complete request');
+      if (result.retryable === true) {
+        submissionInProgress = false;
+        persistSubmissionState('retryable');
+        displayStatus(genericError, 'error');
+        button.disabled = false;
+        button.textContent = 'Request Info';
+        return;
+      }
+      submissionHandled = true;
+      button.disabled = true;
+      button.textContent = 'Processing...';
+      displayStatus(ambiguousError, 'error');
+      persistSubmissionState('pending');
     } catch (error) {
-      submissionInProgress = false;
-      displayStatus(genericError, 'error');
-      button.disabled = false;
-      button.textContent = 'Request Info';
+      submissionHandled = true;
+      button.disabled = true;
+      button.textContent = 'Processing...';
+      displayStatus(ambiguousError, 'error');
+      persistSubmissionState('pending');
     }
   });
 
@@ -256,6 +331,7 @@
     setAddressValue();
     wireNavigation();
     updateStep(1);
+    restoreSubmissionState();
     await hydrateProgramSelection();
   }
 

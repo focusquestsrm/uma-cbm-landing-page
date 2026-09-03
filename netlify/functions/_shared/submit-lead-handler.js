@@ -1,8 +1,14 @@
 'use strict';
 
-const crypto = require('crypto');
 const { classifyLeadHoopResponse } = require('./leadhoop-response');
 const graduationYears = require('../../../src/js/graduation-years');
+const {
+  completeSubmission,
+  getSubmissionStore,
+  reserveSubmission,
+  responseForDuplicate,
+  validSubmissionId
+} = require('./submission-idempotency');
 const {
   currentCampaignMonth,
   getAvailabilityStore,
@@ -15,7 +21,7 @@ const FIELD_ALLOWLIST = new Set([
   'lead[service_trusted_form]', 'lead[service_leadid]', 'lead_consent[tcpa_consent]',
   'lead_education[program_id]', 'lead_education[grad_year]', 'lead_education[education_level_id]',
   'lead_address[address]', 'lead_address[city]', 'lead_address[state]', 'lead_address[zip]',
-  'subid2', 'subid3', 'subid4', 'meta_event_id',
+  'subid2', 'subid3', 'subid4', 'meta_event_id', 'submission_id',
   'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'campaign_id'
 ]);
 const META_ATTRIBUTION_FIELDS = new Set(['subid2', 'subid3', 'subid4']);
@@ -29,9 +35,7 @@ const RESPONSE_HEADERS = {
   'Cache-Control': 'no-store',
   'X-Content-Type-Options': 'nosniff'
 };
-const DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
-const recentSubmissions = new Map();
-
+const LEADHOOP_TIMEOUT_MS = 25 * 1000;
 let PROGRAMS = new Set();
 let PROGRAM_CONFIGURATION_VALID = false;
 try {
@@ -81,8 +85,8 @@ function secureUrl(value) {
 
 function readConfiguration() {
   const booleans = {
-    submission: setting(['LEAD', 'SUBMISSION', 'ENABLED']) || setting(['LEAD', 'SUBMISSION_ENABLED']),
-    validation: setting(['LEAD', 'TEST', 'MODE']) || setting(['LEAD', 'TEST', 'FLAG']) || setting(['LEAD', 'TEST_FLAG']),
+    submission: setting(['LEAD', 'SUBMISSION', 'ENABLED']),
+    validation: setting(['LEAD', 'TEST', 'FLAG']),
     campaign: setting(['LEADHOOP', 'CAMPAIGN', 'ENABLED'])
   };
   if (Object.values(booleans).some(function (value) { return value !== 'true' && value !== 'false'; })) return null;
@@ -162,26 +166,20 @@ function makePayload(event, config) {
   return outbound;
 }
 
-function submissionFingerprint(payload) {
-  const fields = [
-    'lead[firstname]', 'lead[lastname]', 'lead[email]', 'lead[phone1]',
-    'lead_address[zip]', 'lead_education[program_id]'
-  ];
-  const normalized = fields.map(function (name) {
-    return String(payload.get(name) || '').trim().toLowerCase();
-  }).join('\u001f');
-  return crypto.createHash('sha256').update(normalized).digest('hex');
+function requestIdentifier(event) {
+  return clean(event.headers && (event.headers['x-nf-request-id'] || event.headers['X-Nf-Request-Id']), 100);
 }
 
-function reserveSubmission(payload) {
-  const now = Date.now();
-  for (const entry of recentSubmissions.entries()) {
-    if (now - entry[1] > DUPLICATE_WINDOW_MS) recentSubmissions.delete(entry[0]);
-  }
-  const fingerprint = submissionFingerprint(payload);
-  if (recentSubmissions.has(fingerprint)) return '';
-  recentSubmissions.set(fingerprint, now);
-  return fingerprint;
+function leadHoopResponseIdentifier(result) {
+  const candidates = [
+    result && result.lead_id,
+    result && result.leadId,
+    result && result.id,
+    result && result.data && result.data.lead_id,
+    result && result.data && result.data.id
+  ];
+  const value = clean(candidates.find(Boolean), 100);
+  return /^[A-Za-z0-9._:-]+$/.test(value) ? value : null;
 }
 
 exports.handler = async function (event) {
@@ -192,11 +190,14 @@ exports.handler = async function (event) {
   const config = readConfiguration();
   if (!config || !hasAllowedOrigin(event, config.origins) || (event.body || '').length > 100000 ||
       !config.submissionEnabled || (!config.validationFlag && !config.campaignEnabled)) {
-    return reply(503, { outcome: 'unavailable' });
+    return reply(503, { outcome: 'unavailable', retryable: true });
   }
 
   const payload = makePayload(event, config);
-  if (!payload) return reply(400, { outcome: 'unavailable' });
+  if (!payload) return reply(400, { outcome: 'unavailable', retryable: true });
+  const submissionId = new URLSearchParams(event.body || '').get('submission_id');
+  if (!validSubmissionId(submissionId)) return reply(400, { outcome: 'unavailable', retryable: true });
+  const functionRequestId = requestIdentifier(event);
 
   let availabilityStore;
   try {
@@ -204,39 +205,77 @@ exports.handler = async function (event) {
     const availability = await readProgram(availabilityStore, payload.get('lead_education[program_id]'));
     if (availability.status !== 'available') return reply(200, { outcome: 'failed', location: config.failedRedirect });
   } catch (error) {
-    console.error(JSON.stringify({ event: 'program_availability_read', completed: false }));
-    return reply(503, { outcome: 'unavailable' });
+    console.error(JSON.stringify({ event: 'program_availability_read', submissionId, functionRequestId, completed: false }));
+    return reply(503, { outcome: 'unavailable', retryable: true });
   }
 
-  const fingerprint = reserveSubmission(payload);
-  if (!fingerprint) return reply(409, { outcome: 'unavailable' });
+  let submissionStore;
+  let reservation;
+  try {
+    submissionStore = getSubmissionStore();
+    reservation = await reserveSubmission(submissionStore, submissionId, functionRequestId);
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'idempotency_reservation', submissionId, functionRequestId, completed: false }));
+    return reply(503, { outcome: 'unavailable', retryable: true });
+  }
+  if (!reservation.owner) {
+    const duplicate = responseForDuplicate(reservation.record);
+    console.info(JSON.stringify({
+      event: 'duplicate_submission', submissionId, functionRequestId,
+      priorState: reservation.record && reservation.record.state || 'processing', outboundRequests: 0
+    }));
+    return reply(duplicate.statusCode, duplicate.body);
+  }
 
   console.info(JSON.stringify({
     event: 'compliance_presence',
+    submissionId,
+    functionRequestId,
+    campaignCode: config.campaignCode,
     trustedForm: Boolean(payload.get('lead[service_trusted_form]')),
     leadId: Boolean(payload.get('lead[service_leadid]'))
   }));
 
   const controller = new AbortController();
-  const timeout = setTimeout(function () { controller.abort(); }, 12000);
+  const timeout = setTimeout(function () { controller.abort(); }, LEADHOOP_TIMEOUT_MS);
   try {
+    console.info(JSON.stringify({ event: 'leadhoop_request', submissionId, functionRequestId, campaignCode: config.campaignCode, outboundRequest: 1 }));
     const vendorResponse = await fetch(config.endpoint + '?' + payload.toString(), {
       method: 'GET',
       headers: { Accept: 'application/json', Authorization: config.authorization },
       signal: controller.signal
     });
     if (!vendorResponse.ok) {
-      recentSubmissions.delete(fingerprint);
-      return reply(502, { outcome: 'unavailable' });
+      const response = { outcome: 'unavailable', retryable: false };
+      await completeSubmission(submissionStore, reservation, 'ambiguous', response);
+      console.error(JSON.stringify({
+        event: 'leadhoop_response', submissionId, functionRequestId, campaignCode: config.campaignCode,
+        httpStatus: vendorResponse.status || null, leadHoopResponseId: null, accepted: null, outboundRequests: 1
+      }));
+      return reply(502, response);
     }
 
     const vendorResult = await vendorResponse.json();
     const classification = classifyLeadHoopResponse(vendorResult);
+    const leadHoopResponseId = leadHoopResponseIdentifier(vendorResult);
     if (classification.technicalFailure) {
-      recentSubmissions.delete(fingerprint);
-      return reply(502, { outcome: 'unavailable' });
+      const response = { outcome: 'unavailable', retryable: false };
+      await completeSubmission(submissionStore, reservation, 'ambiguous', response);
+      console.error(JSON.stringify({
+        event: 'leadhoop_response', submissionId, functionRequestId, campaignCode: config.campaignCode,
+        httpStatus: vendorResponse.status || null, leadHoopResponseId, accepted: false, outboundRequests: 1
+      }));
+      return reply(502, response);
     }
-    if (classification.accepted) return reply(200, { outcome: 'accepted', location: config.acceptedRedirect });
+    if (classification.accepted) {
+      const response = { outcome: 'accepted', location: config.acceptedRedirect };
+      await completeSubmission(submissionStore, reservation, 'completed', response);
+      console.info(JSON.stringify({
+        event: 'leadhoop_response', submissionId, functionRequestId, campaignCode: config.campaignCode,
+        httpStatus: vendorResponse.status || null, leadHoopResponseId, accepted: true, outboundRequests: 1
+      }));
+      return reply(200, response);
+    }
     if (classification.status) {
       const settings = {
         updatedBy: 'leadhoop_response',
@@ -260,11 +299,21 @@ exports.handler = async function (event) {
         }));
       }
     }
-    return reply(200, { outcome: 'failed', location: config.failedRedirect });
+    const response = { outcome: 'failed', location: config.failedRedirect };
+    await completeSubmission(submissionStore, reservation, 'completed', response);
+    console.info(JSON.stringify({
+      event: 'leadhoop_response', submissionId, functionRequestId, campaignCode: config.campaignCode,
+      httpStatus: vendorResponse.status || null, leadHoopResponseId, accepted: false, outboundRequests: 1
+    }));
+    return reply(200, response);
   } catch (error) {
-    recentSubmissions.delete(fingerprint);
-    console.error(JSON.stringify({ event: 'submission_error', completed: false }));
-    return reply(502, { outcome: 'unavailable' });
+    const response = { outcome: 'unavailable', retryable: false };
+    await completeSubmission(submissionStore, reservation, 'ambiguous', response);
+    console.error(JSON.stringify({
+      event: 'submission_error', submissionId, functionRequestId, campaignCode: config.campaignCode,
+      completed: false, outboundRequests: 1, error: String(error && error.message || error)
+    }));
+    return reply(502, response);
   } finally {
     clearTimeout(timeout);
   }
