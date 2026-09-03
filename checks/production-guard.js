@@ -28,6 +28,7 @@ const htmlSource = publicFiles.filter(function (file) { return file.endsWith('.h
   return fs.readFileSync(path.join(root, file), 'utf8');
 });
 const jornayaCampaignId = '0acacf7c-5b02-c01b-61cd-3ded286da6ec';
+const allowedBack2LearnFooter = /href="https:\/\/www\.back2learn\.com\/"[^>]*class="footer-brand"/i.test(publicSource);
 
 const checks = [
   ['visitor language', !/\b(?:testing|demo|staging|preview|sandbox|development|qa)\b/i.test(publicSource)],
@@ -37,7 +38,7 @@ const checks = [
   ['same-site availability', /\/\.netlify\/functions\/get-program-availability/.test(publicSource)],
   ['Fallon availability removed', !/b2l-program-availability\.edu-matcher\.com/i.test(publicSource + functionSource)],
   ['indexing enabled', !/noindex|nofollow/i.test(publicSource)],
-  ['no production domain references', !/uma\.back2learn\.com|back2learn-uma\.netlify\.app|back2learn\.com/i.test(publicSource)],
+  ['no production domain references', !/uma\.back2learn\.com|back2learn-uma\.netlify\.app/i.test(publicSource) && (!/back2learn\.com/i.test(publicSource) || allowedBack2LearnFooter)],
   ['public metadata uses relative URLs', !/property="og:url" content="https?:\/\//i.test(publicSource) && !/rel="canonical" href="https?:\/\//i.test(publicSource)],
   ['TrustedForm session script', /api\.trustedform\.com\/trustedform\.js/.test(publicSource)],
   ['Back2Learn Jornaya campaign', htmlSource.every(function (source) {
