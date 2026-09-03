@@ -4,10 +4,10 @@
   const dataUrl = '/.netlify/functions/get-program-availability';
   const fallbackDataUrl = '/data/uma-kayla-programs.json';
   const fallbackCatalog = Object.freeze([
-    { program_id: '227753', program_name: 'Health and Human Services', active: true, display_order: 1 },
-    { program_id: '227754', program_name: 'Healthcare Management', active: true, display_order: 2 },
-    { program_id: '227755', program_name: 'Medical Administrative Assistant', active: true, display_order: 3 },
-    { program_id: '227756', program_name: 'Medical Billing and Coding', active: true, display_order: 4 }
+    { program_id: '227753', program_name: 'A.A.S. – Health and Human Services', active: true, display_order: 1 },
+    { program_id: '227754', program_name: 'A.A.S. – Healthcare Management', active: true, display_order: 2 },
+    { program_id: '227755', program_name: 'A.A.S. – Medical Administrative Assistant', active: true, display_order: 3 },
+    { program_id: '227756', program_name: 'A.A.S. – Medical Billing and Coding', active: true, display_order: 4 }
   ]);
   const iconById = {
     '227753': '🖥️',
@@ -16,6 +16,10 @@
     '227754': '📄'
   };
   let cachedPrograms = null;
+
+  function displayProgramName(value) {
+    return String(value || '').replace(/\bA\.?A\.?S\.?\b/gi, '').replace(/Associate of Applied Science/gi, '').replace(/[–—-]/g, ' ').replace(/\s+/g, ' ').replace(/^\s*\.\s*/, '').trim();
+  }
 
   function validatePrograms(value) {
     if (!Array.isArray(value) || value.length === 0) throw new Error('Program configuration is unavailable.');
@@ -81,7 +85,8 @@
     select.replaceChildren(new Option('Please Select', '', true, false));
     select.options[0].disabled = true;
     programs.forEach(function (program) {
-      select.add(new Option(program.program_name, program.program_id));
+      const programName = program.display_name || displayProgramName(program.program_name);
+      select.add(new Option(programName, program.program_id));
     });
     select.disabled = false;
   }
@@ -100,7 +105,7 @@
       icon.textContent = iconById[program.program_id] || '🎓';
       const heading = document.createElement('h3');
       heading.className = 'program-title';
-      heading.textContent = program.program_name;
+      heading.textContent = program.display_name || displayProgramName(program.program_name);
       const link = document.createElement('a');
       link.href = '#leadform';
       link.dataset.programId = program.program_id;
@@ -112,5 +117,5 @@
     });
   }
 
-  window.UMA_PROGRAM_AVAILABILITY = { loadPrograms, populateSelect, renderCards, validatePrograms };
+  window.UMA_PROGRAM_AVAILABILITY = { loadPrograms, populateSelect, renderCards, validatePrograms, displayProgramName };
 })();

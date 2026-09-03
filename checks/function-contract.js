@@ -89,6 +89,21 @@ function adminEvent(body, secret) {
   assert(initialized.every(function (record) { return record.status === 'available' && record.updatedBy === 'initialization'; }));
   assert(store.getOptions.every(function (options) { return options.consistency === 'strong'; }));
 
+  const legacyNameRecord = {
+    campaign: 'uma-health',
+    programId: '227753',
+    programName: 'A.A.S. – Health and Human Services',
+    status: 'available',
+    reasonCategory: null,
+    effectiveMonth: null,
+    updatedAt: '2026-08-26T12:00:00Z',
+    updatedBy: 'initialization'
+  };
+  await store.setJSON('uma-health:227753', legacyNameRecord);
+  const repaired = await availability.readProgram(store, '227753', new Date('2026-08-26T12:15:00Z'));
+  assert.strictEqual(repaired.programName, 'A.A.S. – Health and Human Services');
+  assert.strictEqual(availability.publicAvailablePrograms([repaired]).at(0).display_name, 'Health and Human Services');
+
   global.fetch = vendorResult({ status: 'success' });
   const accepted = await submit(leadEvent('227753'));
   assert.strictEqual(accepted.statusCode, 200);

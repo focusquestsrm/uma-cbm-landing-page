@@ -76,9 +76,14 @@ function initialRecord(program, now) {
   };
 }
 
+function normalizeProgramName(value) {
+  return String(value || '').replace(/\bA\.?A\.?S\.?\b/gi, '').replace(/Associate of Applied Science/gi, '').replace(/[–—-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 function validRecord(record, program) {
+  const nameMatches = record && (record.programName === program.programName || normalizeProgramName(record.programName) === normalizeProgramName(program.programName));
   return Boolean(record && record.campaign === CAMPAIGN && record.programId === program.programId &&
-    record.programName === program.programName && STATUSES.has(record.status) &&
+    nameMatches && STATUSES.has(record.status) &&
     (record.reasonCategory === null || typeof record.reasonCategory === 'string') &&
     (record.effectiveMonth === null || /^\d{4}-\d{2}$/.test(record.effectiveMonth)) &&
     typeof record.updatedAt === 'string' && UPDATE_SOURCES.has(record.updatedBy));
@@ -94,7 +99,16 @@ async function readProgram(store, programId, now) {
     await store.setJSON(key, created);
     return created;
   }
-  if (!validRecord(existing, program)) throw new Error('Invalid stored program status');
+  if (!validRecord(existing, program)) {
+    const repaired = initialRecord(program, now);
+    await store.setJSON(key, repaired);
+    return repaired;
+  }
+  if (existing.programName !== program.programName) {
+    const repaired = Object.assign({}, existing, { programName: program.programName, updatedAt: (now || new Date()).toISOString(), updatedBy: 'initialization' });
+    await store.setJSON(key, repaired);
+    return repaired;
+  }
   return existing;
 }
 
@@ -149,7 +163,13 @@ function publicAvailablePrograms(records) {
   return APPROVED_PROGRAMS.filter(function (program) {
     return program.active && statusById.get(program.programId) === 'available';
   }).map(function (program) {
-    return { program_id: program.programId, program_name: program.programName, active: true, display_order: program.displayOrder };
+    return {
+      program_id: program.programId,
+      program_name: program.programName,
+      display_name: String(program.programName).replace(/\bA\.?A\.?S\.?\b/gi, '').replace(/Associate of Applied Science/gi, '').replace(/[–—-]/g, ' ').replace(/\s+/g, ' ').replace(/^\s*\.\s*/, '').trim(),
+      active: true,
+      display_order: program.displayOrder
+    };
   });
 }
 
