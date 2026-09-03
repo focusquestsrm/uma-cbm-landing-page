@@ -123,7 +123,15 @@ assert.match(generatedFbc.fields.subid2.value, /^fb\.1\.\d+\.TEST-FBCLID-3333$/)
 assert(generatedFbc.cookie.includes('_fbc='), 'The application must persist its generated _fbc cookie');
 
 function field(value) {
-  return { value: value || '', events: [], dispatchEvent: function (event) { this.events.push(event.type); } };
+  return {
+    value: value || '',
+    events: [],
+    listeners: {},
+    dispatchEvent: function (event) { this.events.push(event.type); if (this.listeners[event.type]) this.listeners[event.type](event); },
+    addEventListener: function (type, listener) { this.listeners[type] = listener; },
+    focus: function () {},
+    blur: function () {}
+  };
 }
 const fields = {
   lead_address_address_visible: field('Manual address'),
@@ -163,6 +171,46 @@ const populated = fields.lead_address_address_visible.value;
 selectedPlace = { address_components: [] };
 listener();
 assert.strictEqual(fields.lead_address_address_visible.value, populated, 'Places failure must not erase manual input');
+
+const duplicateProtection = makeDocument({
+  lead_address_address_visible: field(''),
+  lead_address_address: field(''),
+  lead_address_city: field(''),
+  lead_address_state: field(''),
+  lead_address_zip: field('')
+});
+duplicateProtection.body = { classList: { add: function () {}, remove: function () {} } };
+const duplicateContext = browserContext(duplicateProtection);
+duplicateContext.UMA_RUNTIME_CONFIG = { googleMapsBrowserKey: 'AIza-test-key' };
+let instanceCount = 0;
+duplicateContext.google = { maps: { places: { Autocomplete: function () {
+  instanceCount += 1;
+  this.addListener = function (name, callback) { return { remove: function () {} }; };
+  this.getPlace = function () { return { address_components: [
+    { long_name: '123', short_name: '123', types: ['street_number'] },
+    { long_name: 'Main Street', short_name: 'Main St', types: ['route'] },
+    { long_name: 'Tampa', short_name: 'Tampa', types: ['locality'] },
+    { long_name: 'Florida', short_name: 'FL', types: ['administrative_area_level_1'] },
+    { long_name: '33602', short_name: '33602', types: ['postal_code'] }
+  ]}; };
+} } } };
+vm.runInContext(placesSource, duplicateContext);
+assert.strictEqual(instanceCount, 1, 'Google Places should initialize immediately when the API is available');
+duplicateContext.google.maps.places.Autocomplete = function () {
+  instanceCount += 1;
+  this.addListener = function (name, callback) { return { remove: function () {} }; };
+  this.getPlace = function () { return { address_components: [
+    { long_name: '123', short_name: '123', types: ['street_number'] },
+    { long_name: 'Main Street', short_name: 'Main St', types: ['route'] },
+    { long_name: 'Tampa', short_name: 'Tampa', types: ['locality'] },
+    { long_name: 'Florida', short_name: 'FL', types: ['administrative_area_level_1'] },
+    { long_name: '33602', short_name: '33602', types: ['postal_code'] }
+  ]}; };
+};
+assert.strictEqual(typeof duplicateContext.UMA_GOOGLE_PLACES.initializePlaces, 'function');
+duplicateContext.UMA_GOOGLE_PLACES.initializePlaces();
+duplicateContext.UMA_GOOGLE_PLACES.initializePlaces();
+assert.strictEqual(instanceCount, 1, 'Google Places must initialize only once per address field');
 
 pages.forEach(function (page) {
   const text = page.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
