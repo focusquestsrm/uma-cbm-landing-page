@@ -165,13 +165,6 @@
       }
       setError(check[2], '');
     }
-    const consent = document.getElementById('tcpa-check');
-    if (!consent || !consent.checked) {
-      setError('consent-error', 'Please confirm the disclosure before continuing.');
-      if (consent) consent.focus();
-      return false;
-    }
-    setError('consent-error', '');
     return true;
   }
 

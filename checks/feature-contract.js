@@ -215,7 +215,8 @@ assert.strictEqual(instanceCount, 1, 'Google Places must initialize only once pe
 pages.forEach(function (page) {
   const text = page.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   assert(text.includes(disclosure), 'The exact TCPA disclosure is missing');
-  assert(/id="tcpa-check"[^>]*type="checkbox"[^>]*required/.test(page));
+  assert(!/<input[^>]*id="tcpa-check"[^>]*type="checkbox"[^>]*>/.test(page), 'The TCPA checkbox should be removed');
+  assert(!/id="consent-error"/.test(page), 'The consent error message should be removed');
   assert(/name="lead_consent\[tcpa_consent\]"[^>]*value="Y"/.test(page));
   assert(/api\.trustedform\.com\/trustedform\.js/.test(page));
   assert(/create\.lidstatic\.com\/campaign\//.test(page));

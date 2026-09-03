@@ -122,7 +122,6 @@ function assert(value, message) {
         set('lead_lastname', 'Review');
         set('lead_email', 'browser.review@example.invalid');
         set('lead_phone1', '2125550100');
-        document.getElementById('tcpa-check').checked = true;
         const body = new URLSearchParams(new FormData(document.getElementById('leadform')));
         return {
           path: location.pathname,
@@ -131,12 +130,13 @@ function assert(value, message) {
           step: document.querySelector('.form-step.is-visible').dataset.step,
           selected: body.get('lead_education[program_id]'),
           submitType: document.getElementById('submitButton').type,
+          hasTcpaCheckbox: Boolean(document.getElementById('tcpa-check')),
           overflow: document.documentElement.scrollWidth > innerWidth
         };
       })()`);
       assert(finalState.path === '/' && finalState.sectionCount === 4 && finalState.visibleSections === 4, `Form steps removed landing content for ${expectedProgram} at ${width}px`);
       assert(finalState.step === '3' && finalState.selected === expectedProgram, `Submission state lost program ${expectedProgram} at ${width}px`);
-      assert(finalState.submitType === 'submit' && !finalState.overflow, `Final form controls or layout are invalid at ${width}px`);
+      assert(finalState.submitType === 'submit' && !finalState.hasTcpaCheckbox && !finalState.overflow, `Final form controls or layout are invalid at ${width}px`);
       programs.push({ id: expectedProgram, afterCard, finalState });
     }
 
