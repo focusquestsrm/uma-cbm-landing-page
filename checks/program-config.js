@@ -9,10 +9,10 @@ const root = path.join(__dirname, '..');
 const csv = fs.readFileSync(path.join(root, 'src/data/uma-kayla-programs.csv'), 'utf8');
 const programs = validateCsv(csv);
 const expected = [
-  { program_id: '227753', program_name: 'A.A.S. – Health and Human Services', active: true, display_order: 1 },
-  { program_id: '227754', program_name: 'A.A.S. – Healthcare Management', active: true, display_order: 2 },
-  { program_id: '227755', program_name: 'A.A.S. – Medical Administrative Assistant', active: true, display_order: 3 },
-  { program_id: '227756', program_name: 'A.A.S. – Medical Billing and Coding', active: true, display_order: 4 }
+  { program_id: '227753', program_name: 'Health and Human Services', active: true, display_order: 1 },
+  { program_id: '227754', program_name: 'Healthcare Management', active: true, display_order: 2 },
+  { program_id: '227755', program_name: 'Medical Administrative Assistant', active: true, display_order: 3 },
+  { program_id: '227756', program_name: 'Medical Billing and Coding', active: true, display_order: 4 }
 ];
 assert.deepStrictEqual(programs, expected);
 
@@ -31,8 +31,8 @@ invalidCases.forEach(function (value) {
 
 const withInactive = validateCsv(
   header +
-  '227754,"A.A.S. – Healthcare Management",false,2\n' +
-  '227753,"A.A.S. – Health and Human Services",true,1\n'
+  '227754,"Healthcare Management",false,2\n' +
+  '227753,"Health and Human Services",true,1\n'
 );
 assert.deepStrictEqual(
   withInactive.filter(function (program) { return program.active; }).map(function (program) { return program.program_id; }),
