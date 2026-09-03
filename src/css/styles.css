@@ -383,6 +383,16 @@ h2.section-title {
   display: none !important;
 }
 
+.pac-container {
+  z-index: 2147483647 !important;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.uma-places-selection-complete .pac-container {
+  display: none !important;
+}
+
 @media (max-width: 767px) {
   .navbar-brand img {
     padding-left: 0;
