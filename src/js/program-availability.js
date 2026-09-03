@@ -2,6 +2,13 @@
   'use strict';
 
   const dataUrl = '/.netlify/functions/get-program-availability';
+  const fallbackDataUrl = '/data/uma-kayla-programs.json';
+  const fallbackCatalog = Object.freeze([
+    { program_id: '227753', program_name: 'Health and Human Services', active: true, display_order: 1 },
+    { program_id: '227754', program_name: 'Healthcare Management', active: true, display_order: 2 },
+    { program_id: '227755', program_name: 'Medical Administrative Assistant', active: true, display_order: 3 },
+    { program_id: '227756', program_name: 'Medical Billing and Coding', active: true, display_order: 4 }
+  ]);
   const iconById = {
     '227753': '🖥️',
     '227755': '🗃️',
@@ -31,13 +38,42 @@
     return active;
   }
 
+  function normalizeFallbackPrograms(value) {
+    const source = Array.isArray(value) ? value : fallbackCatalog;
+    return validatePrograms(source.filter(function (program) {
+      return !!program && typeof program === 'object';
+    }).map(function (program) {
+      return {
+        program_id: String(program.program_id || ''),
+        program_name: String(program.program_name || '').trim(),
+        active: Boolean(program.active),
+        display_order: Number(program.display_order || 0)
+      };
+    }).filter(function (program) {
+      return /^\d+$/.test(program.program_id) && program.program_name && Number.isInteger(program.display_order) && program.display_order >= 1;
+    }));
+  }
+
   async function loadPrograms() {
     if (cachedPrograms) return cachedPrograms.slice();
-    const response = await fetch(dataUrl, { credentials: 'same-origin', cache: 'no-store' });
-    if (!response.ok) throw new Error('Program configuration could not be loaded.');
-    const result = await response.json();
-    cachedPrograms = validatePrograms(result && result.programs);
-    return cachedPrograms.slice();
+    try {
+      const response = await fetch(dataUrl, { credentials: 'same-origin', cache: 'no-store' });
+      if (!response.ok) throw new Error('Program configuration could not be loaded.');
+      const result = await response.json();
+      cachedPrograms = validatePrograms(result && result.programs);
+      return cachedPrograms.slice();
+    } catch (error) {
+      try {
+        const fallbackResponse = await fetch(fallbackDataUrl, { credentials: 'same-origin', cache: 'no-store' });
+        if (!fallbackResponse.ok) throw new Error('Fallback program catalog is unavailable.');
+        const fallbackResult = await fallbackResponse.json();
+        cachedPrograms = normalizeFallbackPrograms(Array.isArray(fallbackResult) ? fallbackResult : (fallbackResult && Array.isArray(fallbackResult.programs) ? fallbackResult.programs : fallbackCatalog));
+        return cachedPrograms.slice();
+      } catch (fallbackError) {
+        cachedPrograms = normalizeFallbackPrograms(fallbackCatalog);
+        return cachedPrograms.slice();
+      }
+    }
   }
 
   function populateSelect(select, programs) {
