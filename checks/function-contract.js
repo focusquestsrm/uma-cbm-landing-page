@@ -63,8 +63,15 @@ function leadEvent(programId, overrides) {
     'lead[email]': `unit-${eventSequence}@example.invalid`,
     'lead[phone1]': `212555${String(1000 + eventSequence).slice(-4)}`,
     'lead[test]': 'true', 'lead[service_trusted_form]': 'certificate-value',
-    'lead[service_leadid]': 'leadid-value', 'lead_education[program_id]': programId,
+    'lead[service_leadid]': 'leadid-value',
+    'lead_education[program_id]': programId,
+    'lead_education[education_level_id]': '2332',
     'lead_education[grad_year]': '2023',
+    'lead_address[address]': '123 Main St',
+    'lead_address[city]': 'Birmingham',
+    'lead_address[state]': 'AL',
+    'lead_address[zip]': '35203',
+    'lead_consent[tcpa_consent]': 'Y',
     submission_id: submissionId,
     subid2: 'fb.1.1111111111.TESTFBC', subid3: 'fb.1.2222222222.TESTFBP', subid4: 'TEST-FBCLID-3333',
     unexpected: 'must-not-pass'
@@ -77,8 +84,11 @@ function leadEvent(programId, overrides) {
 }
 
 function vendorResult(result) {
-  return async function (url) {
+  return async function (url, init) {
     vendorResult.lastUrl = String(url);
+    vendorResult.lastMethod = init && init.method ? String(init.method) : 'GET';
+    vendorResult.lastHeaders = init && init.headers ? Object.assign({}, init.headers) : {};
+    vendorResult.lastBody = init && init.body ? String(init.body) : '';
     return { ok: true, json: async function () { return result; } };
   };
 }
@@ -112,10 +122,29 @@ function adminEvent(body, secret) {
   const accepted = await submit(leadEvent('227753'));
   assert.strictEqual(accepted.statusCode, 200);
   assert.deepStrictEqual(JSON.parse(accepted.body), { outcome: 'accepted', location: 'https://redirect.invalid/accepted' });
-  assert.match(vendorResult.lastUrl, /lead%5Btest%5D=false/);
-  assert.doesNotMatch(vendorResult.lastUrl, /lead%5Btest%5D=true|unexpected=/);
-  assert.strictEqual(new URL(vendorResult.lastUrl).searchParams.get('lead_education[grad_year]'), '2023');
-  const attributionPayload = new URL(vendorResult.lastUrl).searchParams;
+  assert.strictEqual(vendorResult.lastMethod, 'POST');
+  assert.strictEqual(vendorResult.lastHeaders['Content-Type'], 'application/x-www-form-urlencoded; charset=UTF-8');
+  const postedPayload = new URLSearchParams(vendorResult.lastBody);
+  assert.strictEqual(postedPayload.get('campaign_code'), 'preserved');
+  assert.strictEqual(postedPayload.get('lead[firstname]'), 'Unit');
+  assert.strictEqual(postedPayload.get('lead[lastname]'), 'Review');
+  assert.strictEqual(postedPayload.get('lead[phone1]'), '2125551001');
+  assert.strictEqual(postedPayload.get('lead[email]'), 'unit-1@example.invalid');
+  assert.strictEqual(postedPayload.get('lead_education[program_id]'), '227753');
+  assert.strictEqual(postedPayload.get('lead_education[campus_id]'), 'preserved-campus');
+  assert.strictEqual(postedPayload.get('lead_education[grad_year]'), '2023');
+  assert.strictEqual(postedPayload.get('lead_background[internet_pc]'), 'Y');
+  assert.strictEqual(postedPayload.get('lead_consent[tcpa_consent]'), 'Y');
+  assert.strictEqual(postedPayload.get('lead[service_leadid]'), 'leadid-value');
+  assert.strictEqual(postedPayload.get('lead[test]'), 'false');
+  assert.strictEqual(postedPayload.get('lead[media_type]'), 'noncallcenter');
+  assert.strictEqual(postedPayload.get('lead_education[education_level_id]'), '2332');
+  assert.strictEqual(postedPayload.get('lead_address[address]'), '123 Main St');
+  assert.strictEqual(postedPayload.get('lead_address[city]'), 'Birmingham');
+  assert.strictEqual(postedPayload.get('lead_address[state]'), 'AL');
+  assert.strictEqual(postedPayload.get('lead_address[zip]'), '35203');
+  assert.doesNotMatch(vendorResult.lastBody, /lead%5Btest%5D=true|unexpected=/);
+  const attributionPayload = postedPayload;
   assert.strictEqual(attributionPayload.get('subid2'), 'fb.1.1111111111.TESTFBC');
   assert.strictEqual(attributionPayload.get('subid3'), 'fb.1.2222222222.TESTFBP');
   assert.strictEqual(attributionPayload.get('subid4'), 'TEST-FBCLID-3333');
@@ -127,7 +156,7 @@ function adminEvent(body, secret) {
   global.fetch = vendorResult({ status: 'success' });
   const protectedAttribution = await submit(leadEvent('227753'));
   assert.strictEqual(protectedAttribution.statusCode, 200);
-  const protectedPayload = new URL(vendorResult.lastUrl).searchParams;
+  const protectedPayload = new URLSearchParams(vendorResult.lastBody);
   assert.strictEqual(protectedPayload.get('subid2'), 'fb.1.1111111111.TESTFBC');
   assert.strictEqual(protectedPayload.get('subid3'), 'fb.1.2222222222.TESTFBP');
   assert.strictEqual(protectedPayload.get('subid4'), 'TEST-FBCLID-3333');
@@ -137,7 +166,7 @@ function adminEvent(body, secret) {
   global.fetch = vendorResult({ status: 'success' });
   const minimumYear = await submit(leadEvent('227753', { 'lead_education[grad_year]': '1996' }));
   assert.strictEqual(minimumYear.statusCode, 200);
-  assert.strictEqual(new URL(vendorResult.lastUrl).searchParams.get('lead_education[grad_year]'), '1996');
+  assert.strictEqual(new URLSearchParams(vendorResult.lastBody).get('lead_education[grad_year]'), '1996');
 
   let blockedVendorCalls = 0;
   global.fetch = async function () { blockedVendorCalls += 1; throw new Error('Invalid graduation year reached vendor'); };

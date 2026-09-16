@@ -62,8 +62,17 @@ function key(parts) {
   return parts.join('_');
 }
 
-function setting(parts) {
-  return process.env[key(parts)];
+function setting(parts, aliases) {
+  const keys = [key(parts)];
+  if (Array.isArray(aliases)) {
+    aliases.forEach(function (alias) {
+      keys.push(key(alias));
+    });
+  }
+  for (const environmentKey of keys) {
+    if (environmentKey in process.env) return process.env[environmentKey];
+  }
+  return undefined;
 }
 
 function clean(value, limit) {
@@ -77,7 +86,11 @@ function reply(statusCode, body) {
 function secureUrl(value) {
   try {
     const parsed = new URL(value);
-    return parsed.protocol === 'https:' ? parsed.toString() : '';
+    const isLeadHoopPostEndpoint = parsed.hostname === 'back2learn-post.leadhoop.com' && parsed.pathname === '/incoming/leads';
+    if (parsed.protocol === 'https:' || (parsed.protocol === 'http:' && isLeadHoopPostEndpoint)) {
+      return parsed.toString();
+    }
+    return '';
   } catch (error) {
     return '';
   }
@@ -86,8 +99,8 @@ function secureUrl(value) {
 function readConfiguration() {
   const booleans = {
     submission: setting(['LEAD', 'SUBMISSION', 'ENABLED']),
-    validation: setting(['LEAD', 'TEST', 'FLAG']),
-    campaign: setting(['LEADHOOP', 'CAMPAIGN', 'ENABLED'])
+    validation: setting(['LEAD', 'TEST', 'FLAG'], [['LEAD', 'TEST', 'MODE']]),
+    campaign: setting(['LEADHOOP', 'CAMPAIGN', 'ENABLED'], [['LEADHOOP', 'CAMPAIGN', 'ACTIVE']])
   };
   if (Object.values(booleans).some(function (value) { return value !== 'true' && value !== 'false'; })) return null;
 
@@ -110,17 +123,16 @@ function readConfiguration() {
     validationFlag: booleans.validation === 'true',
     campaignEnabled: booleans.campaign === 'true',
     origins,
-    endpoint: secureUrl(setting(['LEADHOOP', 'ENDPOINT'])),
-    authorization: clean(setting(['LEADHOOP', 'AUTHORIZATION']), 1000),
+    endpoint: secureUrl(setting(['LEADHOOP', 'ENDPOINT'], [['LEADHOOP', 'POST', 'URL']])),
     campaignCode: clean(setting(['LEADHOOP', 'CAMPAIGN', 'CODE']), 500),
     campusId: clean(setting(['LEADHOOP', 'CAMPUS', 'ID']), 100),
     signupUrl: clean(setting(['LEAD', 'SIGNUP', 'URL']), 500),
     fixedFields,
-    acceptedRedirect: secureUrl(setting(['ACCEPTED', 'LEAD', 'REDIRECT', 'URL'])),
-    failedRedirect: secureUrl(setting(['FAILED', 'LEAD', 'REDIRECT', 'URL']))
+    acceptedRedirect: secureUrl(setting(['ACCEPTED', 'LEAD', 'REDIRECT', 'URL'], [['ACCEPTED', 'REDIRECT', 'URL']])) || secureUrl(setting(['ACCEPTED', 'REDIRECT', 'URL'])),
+    failedRedirect: secureUrl(setting(['FAILED', 'LEAD', 'REDIRECT', 'URL'], [['FAILED', 'REDIRECT', 'URL']])) || secureUrl(setting(['FAILED', 'REDIRECT', 'URL']))
   };
 
-  if (!PROGRAM_CONFIGURATION_VALID || config.origins.length === 0 || !config.endpoint || !config.authorization ||
+  if (!PROGRAM_CONFIGURATION_VALID || config.origins.length === 0 || !config.endpoint ||
       !config.campaignCode || !config.campusId || !config.signupUrl || !config.acceptedRedirect ||
       !config.failedRedirect) return null;
   return config;
@@ -162,6 +174,7 @@ function makePayload(event, config) {
   outbound.set('campaign_code', config.campaignCode);
   outbound.set('lead_education[campus_id]', config.campusId);
   outbound.set('lead_education[start_date]', 'Immediately');
+  outbound.set('lead_consent[tcpa_consent]', 'Y');
   outbound.set('lead_background[internet_pc]', 'Y');
   return outbound;
 }
@@ -240,9 +253,13 @@ exports.handler = async function (event) {
   const timeout = setTimeout(function () { controller.abort(); }, LEADHOOP_TIMEOUT_MS);
   try {
     console.info(JSON.stringify({ event: 'leadhoop_request', submissionId, functionRequestId, campaignCode: config.campaignCode, outboundRequest: 1 }));
-    const vendorResponse = await fetch(config.endpoint + '?' + payload.toString(), {
-      method: 'GET',
-      headers: { Accept: 'application/json', Authorization: config.authorization },
+    const vendorResponse = await fetch(config.endpoint, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+      },
+      body: payload.toString(),
       signal: controller.signal
     });
     if (!vendorResponse.ok) {
