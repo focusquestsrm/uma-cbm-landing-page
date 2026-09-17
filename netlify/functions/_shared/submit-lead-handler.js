@@ -83,6 +83,10 @@ function reply(statusCode, body) {
   return { statusCode, headers: RESPONSE_HEADERS, body: JSON.stringify(body) };
 }
 
+function unavailableResponse(code) {
+  return reply(503, { outcome: 'unavailable', retryable: true, diagnosticCode: code });
+}
+
 function secureUrl(value) {
   try {
     const parsed = new URL(value);
@@ -203,7 +207,7 @@ exports.handler = async function (event) {
   const config = readConfiguration();
   if (!config || !hasAllowedOrigin(event, config.origins) || (event.body || '').length > 100000 ||
       !config.submissionEnabled || (!config.validationFlag && !config.campaignEnabled)) {
-    return reply(503, { outcome: 'unavailable', retryable: true });
+    return unavailableResponse('503_CONFIG_ORIGIN_GATE');
   }
 
   const payload = makePayload(event, config);
@@ -219,7 +223,7 @@ exports.handler = async function (event) {
     if (availability.status !== 'available') return reply(200, { outcome: 'failed', location: config.failedRedirect });
   } catch (error) {
     console.error(JSON.stringify({ event: 'program_availability_read', submissionId, functionRequestId, completed: false }));
-    return reply(503, { outcome: 'unavailable', retryable: true });
+    return unavailableResponse('503_PROGRAM_AVAILABILITY_READ');
   }
 
   let submissionStore;
@@ -229,7 +233,7 @@ exports.handler = async function (event) {
     reservation = await reserveSubmission(submissionStore, submissionId, functionRequestId);
   } catch (error) {
     console.error(JSON.stringify({ event: 'idempotency_reservation', submissionId, functionRequestId, completed: false }));
-    return reply(503, { outcome: 'unavailable', retryable: true });
+    return unavailableResponse('503_IDEMPOTENCY_RESERVATION');
   }
   if (!reservation.owner) {
     const duplicate = responseForDuplicate(reservation.record);
