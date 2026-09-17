@@ -87,6 +87,10 @@ function unavailableResponse(code) {
   return reply(503, { outcome: 'unavailable', retryable: true, diagnosticCode: code });
 }
 
+function logUnavailable(code) {
+  console.info(JSON.stringify({ event: 'submit_lead_unavailable', diagnosticCode: code }));
+}
+
 function secureUrl(value) {
   try {
     const parsed = new URL(value);
@@ -205,9 +209,25 @@ exports.handler = async function (event) {
   }
 
   const config = readConfiguration();
-  if (!config || !hasAllowedOrigin(event, config.origins) || (event.body || '').length > 100000 ||
-      !config.submissionEnabled || (!config.validationFlag && !config.campaignEnabled)) {
-    return unavailableResponse('503_CONFIG_ORIGIN_GATE');
+  if (!config) {
+    logUnavailable('503_CONFIG_INVALID');
+    return unavailableResponse('503_CONFIG_INVALID');
+  }
+  if (!hasAllowedOrigin(event, config.origins)) {
+    logUnavailable('503_ORIGIN_REJECTED');
+    return unavailableResponse('503_ORIGIN_REJECTED');
+  }
+  if ((event.body || '').length > 100000) {
+    logUnavailable('503_BODY_TOO_LARGE');
+    return unavailableResponse('503_BODY_TOO_LARGE');
+  }
+  if (!config.submissionEnabled) {
+    logUnavailable('503_SUBMISSION_DISABLED');
+    return unavailableResponse('503_SUBMISSION_DISABLED');
+  }
+  if (!config.validationFlag && !config.campaignEnabled) {
+    logUnavailable('503_CAMPAIGN_DISABLED');
+    return unavailableResponse('503_CAMPAIGN_DISABLED');
   }
 
   const payload = makePayload(event, config);
