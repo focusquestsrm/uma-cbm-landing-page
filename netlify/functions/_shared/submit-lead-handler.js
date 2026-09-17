@@ -91,6 +91,10 @@ function logUnavailable(code) {
   console.info(JSON.stringify({ event: 'submit_lead_unavailable', diagnosticCode: code }));
 }
 
+function logConfigValidation(issues) {
+  console.info(JSON.stringify({ event: 'read_configuration_failed', issues }));
+}
+
 function secureUrl(value) {
   try {
     const parsed = new URL(value);
@@ -105,25 +109,76 @@ function secureUrl(value) {
 }
 
 function readConfiguration() {
+  const issues = [];
   const booleans = {
     submission: setting(['LEAD', 'SUBMISSION', 'ENABLED']),
     validation: setting(['LEAD', 'TEST', 'FLAG'], [['LEAD', 'TEST', 'MODE']]),
     campaign: setting(['LEADHOOP', 'CAMPAIGN', 'ENABLED'], [['LEADHOOP', 'CAMPAIGN', 'ACTIVE']])
   };
-  if (Object.values(booleans).some(function (value) { return value !== 'true' && value !== 'false'; })) return null;
+  if (booleans.submission !== 'true' && booleans.submission !== 'false') {
+    issues.push({ setting: 'LEAD_SUBMISSION_ENABLED', reason: booleans.submission == null ? 'missing' : 'invalid_boolean' });
+  }
+  if (booleans.validation !== 'true' && booleans.validation !== 'false') {
+    issues.push({ setting: 'LEAD_TEST_FLAG', reason: booleans.validation == null ? 'missing' : 'invalid_boolean' });
+  }
+  if (booleans.campaign !== 'true' && booleans.campaign !== 'false') {
+    issues.push({ setting: 'LEADHOOP_CAMPAIGN_ENABLED', reason: booleans.campaign == null ? 'missing' : 'invalid_boolean' });
+  }
 
   const originsValue = setting(['ALLOWED', 'ORIGINS']);
   const origins = String(originsValue || '').split(',').map(function (value) {
     try { return new URL(value.trim()).origin; } catch (error) { return ''; }
   }).filter(Boolean);
+  if (!originsValue || origins.length === 0) {
+    issues.push({ setting: 'ALLOWED_ORIGINS', reason: !originsValue ? 'missing' : 'empty_or_invalid' });
+  }
 
   let fixedFields;
   try {
     fixedFields = JSON.parse(setting(['LEADHOOP', 'FIXED', 'FIELDS']));
-    if (!fixedFields || Array.isArray(fixedFields) || typeof fixedFields !== 'object') return null;
-    if (Object.keys(fixedFields).some(function (name) { return SERVER_FIELDS.has(name); })) return null;
+    if (!fixedFields || Array.isArray(fixedFields) || typeof fixedFields !== 'object') {
+      issues.push({ setting: 'LEADHOOP_FIXED_FIELDS', reason: 'invalid_json' });
+    }
+    if (fixedFields && Object.keys(fixedFields).some(function (name) { return SERVER_FIELDS.has(name); })) {
+      issues.push({ setting: 'LEADHOOP_FIXED_FIELDS', reason: 'reserved_field' });
+    }
   } catch (error) {
-    return null;
+    issues.push({ setting: 'LEADHOOP_FIXED_FIELDS', reason: 'invalid_json' });
+  }
+
+  const endpointValue = setting(['LEADHOOP', 'ENDPOINT'], [['LEADHOOP', 'POST', 'URL']]);
+  const endpoint = secureUrl(endpointValue);
+  if (!endpoint) {
+    issues.push({ setting: 'LEADHOOP_ENDPOINT', reason: endpointValue ? 'invalid_url' : 'missing' });
+  }
+
+  const campaignCode = clean(setting(['LEADHOOP', 'CAMPAIGN', 'CODE']), 500);
+  if (!campaignCode) {
+    issues.push({ setting: 'LEADHOOP_CAMPAIGN_CODE', reason: 'missing' });
+  }
+
+  const campusId = clean(setting(['LEADHOOP', 'CAMPUS', 'ID']), 100);
+  if (!campusId) {
+    issues.push({ setting: 'LEADHOOP_CAMPUS_ID', reason: 'missing' });
+  }
+
+  const signupUrl = clean(setting(['LEAD', 'SIGNUP', 'URL']), 500);
+  if (!signupUrl) {
+    issues.push({ setting: 'LEAD_SIGNUP_URL', reason: 'missing' });
+  }
+
+  const acceptedRedirect = secureUrl(setting(['ACCEPTED', 'LEAD', 'REDIRECT', 'URL'], [['ACCEPTED', 'REDIRECT', 'URL']])) || secureUrl(setting(['ACCEPTED', 'REDIRECT', 'URL']));
+  if (!acceptedRedirect) {
+    issues.push({ setting: 'ACCEPTED_LEAD_REDIRECT_URL', reason: 'missing_or_invalid_url' });
+  }
+
+  const failedRedirect = secureUrl(setting(['FAILED', 'LEAD', 'REDIRECT', 'URL'], [['FAILED', 'REDIRECT', 'URL']])) || secureUrl(setting(['FAILED', 'REDIRECT', 'URL']));
+  if (!failedRedirect) {
+    issues.push({ setting: 'FAILED_LEAD_REDIRECT_URL', reason: 'missing_or_invalid_url' });
+  }
+
+  if (!PROGRAM_CONFIGURATION_VALID) {
+    issues.push({ setting: 'PROGRAM_CONFIGURATION', reason: 'invalid_program_data' });
   }
 
   const config = {
@@ -131,18 +186,20 @@ function readConfiguration() {
     validationFlag: booleans.validation === 'true',
     campaignEnabled: booleans.campaign === 'true',
     origins,
-    endpoint: secureUrl(setting(['LEADHOOP', 'ENDPOINT'], [['LEADHOOP', 'POST', 'URL']])),
-    campaignCode: clean(setting(['LEADHOOP', 'CAMPAIGN', 'CODE']), 500),
-    campusId: clean(setting(['LEADHOOP', 'CAMPUS', 'ID']), 100),
-    signupUrl: clean(setting(['LEAD', 'SIGNUP', 'URL']), 500),
+    endpoint,
+    campaignCode,
+    campusId,
+    signupUrl,
     fixedFields,
-    acceptedRedirect: secureUrl(setting(['ACCEPTED', 'LEAD', 'REDIRECT', 'URL'], [['ACCEPTED', 'REDIRECT', 'URL']])) || secureUrl(setting(['ACCEPTED', 'REDIRECT', 'URL'])),
-    failedRedirect: secureUrl(setting(['FAILED', 'LEAD', 'REDIRECT', 'URL'], [['FAILED', 'REDIRECT', 'URL']])) || secureUrl(setting(['FAILED', 'REDIRECT', 'URL']))
+    acceptedRedirect,
+    failedRedirect
   };
 
-  if (!PROGRAM_CONFIGURATION_VALID || config.origins.length === 0 || !config.endpoint ||
-      !config.campaignCode || !config.campusId || !config.signupUrl || !config.acceptedRedirect ||
-      !config.failedRedirect) return null;
+  if (issues.length > 0) {
+    logConfigValidation(issues);
+    return null;
+  }
+
   return config;
 }
 
